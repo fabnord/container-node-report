@@ -89,6 +89,36 @@ def _paginate_combined(falcon, method_name, label, fql_filter=None):
     return items
 
 
+def _paginate_nodes_sharded(falcon, window_hours=24, shard_hours=4, extra_filter=None):
+    """Shard read_nodes_combined across time windows to stay under the 10k offset cap."""
+    now = datetime.now(timezone.utc)
+    shard_starts = []
+    t = now - timedelta(hours=window_hours)
+    while t < now:
+        shard_starts.append(t)
+        t += timedelta(hours=shard_hours)
+
+    seen = {}  # node_name -> node resource (latest last_seen wins)
+    for i, shard_start in enumerate(shard_starts):
+        shard_end = min(shard_start + timedelta(hours=shard_hours), now)
+        start_str = shard_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str   = shard_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        shard_filter = f"last_seen:>='{start_str}'+last_seen:<'{end_str}'"
+        if extra_filter:
+            shard_filter = f"{shard_filter}+{extra_filter}"
+        label = f"nodes (shard {i+1}/{len(shard_starts)}: {start_str}-{end_str})"
+        shard_nodes = _paginate_combined(falcon, "read_nodes_combined", label,
+                                         fql_filter=shard_filter)
+        for node in shard_nodes:
+            name = node.get("node_name", "")
+            if not name:
+                continue
+            if name not in seen or node.get("last_seen", "") > seen[name].get("last_seen", ""):
+                seen[name] = node
+
+    return list(seen.values())
+
+
 def _count_for_node(falcon, node_name, since):
     """Return (container_count, pod_count) of running resources active since `since` for a single node."""
     node_fql = f"node_name:'{node_name}'"
@@ -216,13 +246,9 @@ def main():
     )
 
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    active_filter = f"last_seen:>='{since}'"
-    if args.fql_filter:
-        active_filter = f"{active_filter}+{args.fql_filter}"
 
     print("Fetching nodes active in the last 24 hours...", file=sys.stderr)
-    nodes = _paginate_combined(falcon, "read_nodes_combined", "nodes",
-                               fql_filter=active_filter)
+    nodes = _paginate_nodes_sharded(falcon, extra_filter=args.fql_filter)
 
     if not nodes:
         print("No nodes returned. Verify the API scope 'Kubernetes Protection: READ' is granted.")
