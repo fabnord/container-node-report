@@ -1,6 +1,6 @@
 # container-node-report
 
-Generates a report of nodes running containers or pods, using the CrowdStrike Falcon Kubernetes Protection API. Results are scoped to nodes, containers, and pods active in the last 24 hours, and sorted by pod count descending.
+Generates a report of nodes running containers or pods, using the CrowdStrike Falcon Kubernetes Protection API. Results are scoped to nodes, containers, and pods active within a configurable look-back window (default: 24 hours), and sorted by pod count descending.
 
 ## Report columns
 
@@ -10,8 +10,11 @@ Generates a report of nodes running containers or pods, using the CrowdStrike Fa
 | `host_id` | Falcon sensor agent ID (AID) |
 | `cluster_name` | Kubernetes cluster name |
 | `cloud_provider` | Cloud provider (AWS, Azure, GCP) |
-| `container_count` | Running containers seen in the last 24 hours |
-| `pod_count` | Pods seen in the last 24 hours |
+| `cloud_account_id` | Cloud account / subscription / project ID |
+| `first_seen` | Timestamp when the node was first seen |
+| `last_seen` | Timestamp when the node was last seen |
+| `container_count` | Running containers seen in the look-back window |
+| `pod_count` | Pods seen in the look-back window |
 
 ## Requirements
 
@@ -72,6 +75,12 @@ uv run --with crowdstrike-falconpy container_node_report.py -o report.csv
 uv run --with crowdstrike-falconpy container_node_report.py --json
 ```
 
+### Query a longer time window
+
+```bash
+uv run --with crowdstrike-falconpy container_node_report.py -H 72
+```
+
 ### Filter by cloud provider
 
 ```bash
@@ -101,6 +110,7 @@ uv run --with crowdstrike-falconpy container_node_report.py \
 -b, --base_url        Falcon cloud region (us1, us2, eu1, usgov1, usgov2)
 -p, --profile         Credential profile from ~/.falconpy/credentials
 -m, --member_cid      Member CID for MSSP/Flight Control
+-H, --hours           Look-back window in hours (default: 24)
 -f, --filter          Additional FQL filter applied to node query
 -o, --output          Output CSV file path
     --json            Output as JSON instead of a table
