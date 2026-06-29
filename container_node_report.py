@@ -45,6 +45,8 @@ def parse_args():
                         help="Credential profile from ~/.falconpy/credentials")
     parser.add_argument("-m", "--member_cid", default=None,
                         help="Member CID for MSSP/Flight Control")
+    parser.add_argument("-H", "--hours", type=int, default=24,
+                        help="Look-back window in hours (default: 24)")
     parser.add_argument("-f", "--filter", default=None, dest="fql_filter",
                         help="FQL filter applied to node query (e.g. \"cloud_name:'AWS'\")")
     parser.add_argument("-o", "--output", default=None,
@@ -182,12 +184,15 @@ def extract_node_record(node, container_counts, pod_counts):
     """Build a report row from a node resource and precomputed count lookups."""
     name = node.get("node_name", "")
     return {
-        "hostname":        name,
-        "host_id":         _sensor_aid(node),
-        "cluster_name":    node.get("cluster_name", ""),
-        "cloud_provider":  node.get("cloud_name", ""),
-        "container_count": container_counts.get(name, 0),
-        "pod_count":       pod_counts.get(name, 0),
+        "hostname":          name,
+        "host_id":           _sensor_aid(node),
+        "cluster_name":      node.get("cluster_name", ""),
+        "cloud_provider":    node.get("cloud_name", ""),
+        "cloud_account_id":  node.get("cloud_account_id", ""),
+        "first_seen":        node.get("first_seen", ""),
+        "last_seen":         node.get("last_seen", ""),
+        "container_count":   container_counts.get(name, 0),
+        "pod_count":         pod_counts.get(name, 0),
     }
 
 
@@ -196,6 +201,9 @@ COLUMNS = [
     "host_id",
     "cluster_name",
     "cloud_provider",
+    "cloud_account_id",
+    "first_seen",
+    "last_seen",
     "container_count",
     "pod_count",
 ]
@@ -245,17 +253,17 @@ def main():
         member_cid=args.member_cid,
     )
 
-    since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = (datetime.now(timezone.utc) - timedelta(hours=args.hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    print("Fetching nodes active in the last 24 hours...", file=sys.stderr)
-    nodes = _paginate_nodes_sharded(falcon, extra_filter=args.fql_filter)
+    print(f"Fetching nodes active in the last {args.hours} hours...", file=sys.stderr)
+    nodes = _paginate_nodes_sharded(falcon, window_hours=args.hours, extra_filter=args.fql_filter)
 
     if not nodes:
         print("No nodes returned. Verify the API scope 'Kubernetes Protection: READ' is granted.")
         return
 
     node_names = [n.get("node_name", "") for n in nodes if n.get("node_name")]
-    print(f"Fetching running container/pod counts (last 24h) for {len(node_names)} nodes...", file=sys.stderr)
+    print(f"Fetching running container/pod counts (last {args.hours}h) for {len(node_names)} nodes...", file=sys.stderr)
     container_counts, pod_counts = build_counts_by_node(falcon, node_names, since)
 
     records = sorted(
